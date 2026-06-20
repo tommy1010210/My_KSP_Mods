@@ -2,7 +2,7 @@ import time
 import krpc
 
 # --- CONFIGURATION ---
-TARGET_ALTITUDE = 100000  # 100km orbit
+TARGET_ALTITUDE = 80000  # 80km orbit
 # ---------------------
 
 print("Connecting to KSP...")

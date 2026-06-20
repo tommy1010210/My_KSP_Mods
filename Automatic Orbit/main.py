@@ -2,12 +2,12 @@ import time
 import krpc
 
 # --- CONFIGURATION ---
-TARGET_ALTITUDE = 80000  # 80km orbit
+TARGET_ALTITUDE = 100000  # 100km target orbit
 # ---------------------
 
 print("Connecting to KSP...")
 try:
-    conn = krpc.connect(name='Universal Autopilot - Optimized Cutoff', rpc_port=50120, stream_port=50121)
+    conn = krpc.connect(name='Universal Autopilot - Perfect Safe Orbit', rpc_port=50120, stream_port=50121)
     print("Connected successfully!")
 except:
     print("Error: Make sure 'Start Server' is clicked in KSP!")
@@ -44,40 +44,62 @@ def update_hud(phase, extra_text=""):
 
 
 def check_for_abort():
-    """Monitors KSP's abort group and triggers a smart vector-aligned recovery sequence."""
+    """Monitors KSP's abort group and triggers a trajectory-aware recovery sequence."""
     if vessel.control.abort:
         print("\n!!! EMERGENCY INTEL-ABORT SYSTEM ENGAGED !!!")
         ui_panel.color = (1.0, 0.1, 0.1)  # Flash HUD Red
 
         vessel.control.throttle = 0.0
-        active_engines = [e for e in vessel.parts.engines if e.active and e.has_fuel]
 
-        if active_engines:
-            update_hud("EMERGENCY RETRO-ALIGN", "Swinging ship around to face Retrograde...")
-            vessel.auto_pilot.engage()
-            planet_frame = vessel.orbit.body.reference_frame
+        # --- CHECK TRAJECTORY PROFILE ---
+        # ONLY do the retro-burn routine if BOTH Apoapsis and Periapsis are above 70km (Stable Orbit)
+        if apoapsis() >= 70000 and periapsis() >= 70000:
+            active_engines = [e for e in vessel.parts.engines if e.active and e.has_fuel]
 
-            while True:
-                forward_orbital_vector = vessel.flight(planet_frame).prograde
-                retrograde_target = (-forward_orbital_vector, -forward_orbital_vector, -forward_orbital_vector)
-                vessel.auto_pilot.target_direction = retrograde_target
+            if active_engines:
+                target_peak_altitude = max(apoapsis(), periapsis())
+                vessel.auto_pilot.engage()
+                planet_frame = vessel.orbit.body.reference_frame
 
-                current_nose_vector = vessel.flight(planet_frame).direction
-                dot_product = sum(a * b for a, b in zip(current_nose_vector, retrograde_target))
-                dot_product = max(-1.0, min(1.0, dot_product))
-                import math
-                angle_error_degrees = math.degrees(math.acos(dot_product))
+                # Coast up to the highest point while steering retrograde
+                while True:
+                    fov = vessel.flight(planet_frame).prograde
+                    retrograde_target = (-fov[0], -fov[1], -fov[2])
+                    vessel.auto_pilot.target_direction = retrograde_target
 
-                if angle_error_degrees < 4.0:
-                    break
-                time.sleep(0.05)
+                    distance_to_peak = target_peak_altitude - altitude()
+                    if distance_to_peak <= 2000 or distance_to_peak < 0:
+                        break
 
-            vessel.control.throttle = 1.0
-            update_hud("DE-ORBIT BURN", "Firing engines to guarantee re-entry...")
-            time.sleep(5)
-            vessel.control.throttle = 0.0
-            vessel.auto_pilot.disengage()
+                    update_hud("COASTING & ALIGNING RETROGRADE",
+                               f"Facing backward | Distance to peak: {distance_to_peak / 1000:.1f} km")
+                    time.sleep(0.1)
 
+                # Double-check alignment before burning
+                while True:
+                    fov = vessel.flight(planet_frame).prograde
+                    retrograde_target = (-fov[0], -fov[1], -fov[2])
+                    current_nose_vector = vessel.flight(planet_frame).direction
+                    dot_product = max(-1.0,
+                                      min(1.0, sum(a * b for a, b in zip(current_nose_vector, retrograde_target))))
+                    import math
+                    if math.degrees(math.acos(dot_product)) < 4.0:
+                        break
+                    time.sleep(0.05)
+
+                # Execute the de-orbit braking burn
+                vessel.control.throttle = 1.0
+                update_hud("EXECUTING DE-ORBIT BURN", "Commencing engine braking...")
+                time.sleep(6)
+                vessel.control.throttle = 0.0
+                vessel.auto_pilot.disengage()
+        else:
+            # --- SUB-ORBITAL DETECTED: NO SPINNING, JUST INSTANT STAGE ---
+            print("[ABORT SYSTEM]: Sub-orbital. Skipping turn and burn. Jettisoning capsule instantly!")
+            update_hud("SUB-ORBITAL ABORT", "Emergency! Dropping stages instantly...")
+            time.sleep(0.1)
+
+        # --- INSTANT CASCADE STAGING DECOUPLER (How we used to do it) ---
         update_hud("VESSEL JETTISON", "Clearing lower vehicle attachments...")
         vessel.control.sas = True
         while vessel.control.current_stage > 0:
@@ -89,8 +111,10 @@ def check_for_abort():
 
         update_hud("CAPSULE RECOVERY", "Deploying safety recovery parachutes...")
         vessel.control.chutes = True
+
         time.sleep(5)
         ui_panel.remove()
+        print("[MISSION COMPUTER]: Abort sequence complete. Exiting.")
         exit()
 
 
@@ -115,7 +139,7 @@ def execute_intelligent_staging():
         time.sleep(0.6)
 
 
-# Initialize Core Autopilot Controls
+# Initialize Controls
 vessel.control.sas = True
 vessel.control.throttle = 1.0
 vessel.control.abort = False
@@ -131,8 +155,7 @@ vessel.control.activate_next_stage()
 
 # --- PHASE 1 & 2: LAUNCH & AUTOMATED GRAVITY TURN ---
 turn_started = False
-# FIXED: Shuts down main engines 5,000 meters early to account for coasting momentum!
-while apoapsis() < (TARGET_ALTITUDE - 5000):
+while apoapsis() < TARGET_ALTITUDE:
     check_for_abort()
     current_alt = altitude()
     execute_intelligent_staging()
@@ -172,30 +195,55 @@ while altitude() < 70000:
     update_hud("COASTING TO SPACE", f"Time to space boundary: {time_to_space}s")
     time.sleep(0.02)
 
-# --- PHASE 4: SPACE OPERATIONS & CIRCULARIZATION ---
+# --- PHASE 4: SPACE OPERATIONS & ORIENTATION ---
 vessel.control.sas = True
 time.sleep(1)
 vessel.control.sas_mode = conn.space_center.SASMode.prograde
 
-while vessel.orbit.time_to_apoapsis > 12:
+while True:
     check_for_abort()
-    update_hud("PRE-BURNS ORIENTATION", f"Waiting for Peak | Time to Burn: {vessel.orbit.time_to_apoapsis:.1f}s")
+    distance_to_peak = apoapsis() - altitude()
+    if distance_to_peak <= 5000:
+        break
+    update_hud("PRE-BURNS ORIENTATION", f"Coasting to Peak | Distance to Burn: {distance_to_peak / 1000:.1f} km")
     time.sleep(0.02)
 
-# Execute the final circularization injection burn
+# Execute final circularization injection burn early
 vessel.control.throttle = 1.0
 while periapsis() < (TARGET_ALTITUDE - 2000):
     check_for_abort()
     execute_intelligent_staging()
+
+    if vessel.thrust == 0.0 and vessel.control.current_stage == 0:
+        break
+
     update_hud("CIRCULARIZATION BURN", f"Injecting Rocket Into Safe Orbit...")
     time.sleep(0.02)
 
-# Mission Success Evaluation
+# Shut off engines
 vessel.control.throttle = 0.0
 vessel.auto_pilot.disengage()
-vessel.control.sas_mode = conn.space_center.SASMode.prograde
 
+# --- THE POST-FLIGHT WATCH LOOP ---
+# Only loops here if the launch script ran all the way through to completion!
 while True:
     check_for_abort()
+
+    # Automatic check: If both points are still sub-orbital, bail out the capsule
+    if apoapsis() < 70000 and periapsis() < 70000:
+        print("\n!!! FAIL-SAFE ACCIDENT RESPONSE ACTUATED !!!")
+        ui_panel.color = (1.0, 0.5, 0.0)
+        vessel.control.throttle = 0.0
+        while vessel.control.current_stage > 0:
+            try:
+                vessel.control.activate_next_stage()
+                time.sleep(0.4)
+            except:
+                break
+        vessel.control.chutes = True
+        ui_panel.remove()
+        exit()
+
     update_hud("MISSION ACCOMPLISHED", "Status: Stable Orbit Established. Computer Idle.")
+    vessel.control.sas_mode = conn.space_center.SASMode.prograde
     time.sleep(1)

@@ -44,7 +44,7 @@ def update_hud(phase, extra_text=""):
 
 
 def check_for_abort():
-    """Monitors KSP's abort group and triggers a trajectory-aware recovery sequence."""
+    """Monitors KSP's abort group and triggers a direct SAS retrograde burn in space or instant staging."""
     if vessel.control.abort:
         print("\n!!! EMERGENCY INTEL-ABORT SYSTEM ENGAGED !!!")
         ui_panel.color = (1.0, 0.1, 0.1)  # Flash HUD Red
@@ -57,51 +57,37 @@ def check_for_abort():
             active_engines = [e for e in vessel.parts.engines if e.active and e.has_fuel]
 
             if active_engines:
-                target_peak_altitude = max(apoapsis(), periapsis())
-                vessel.auto_pilot.engage()
-                planet_frame = vessel.orbit.body.reference_frame
+                update_hud("EMERGENCY RETRO-ALIGN", "In Orbit: Activating SAS Retrograde mode...")
 
-                # Coast up to the highest point while steering retrograde
-                while True:
-                    fov = vessel.flight(planet_frame).prograde
-                    retrograde_target = (-fov[0], -fov[1], -fov[2])
-                    vessel.auto_pilot.target_direction = retrograde_target
+                # 1. Turn on KSP's built-in SAS system
+                vessel.control.sas = True
+                time.sleep(0.1)  # Brief pause to let the game register SAS activation
 
-                    distance_to_peak = target_peak_altitude - altitude()
-                    if distance_to_peak <= 2000 or distance_to_peak < 0:
-                        break
+                # 2. Tell SAS to select the native 'Retrograde' button
+                vessel.control.sas_mode = conn.space_center.SASMode.retrograde
 
-                    update_hud("COASTING & ALIGNING RETROGRADE",
-                               f"Facing backward | Distance to peak: {distance_to_peak / 1000:.1f} km")
-                    time.sleep(0.1)
+                # 3. Give the ship 6 seconds to physically swing around backward
+                # No complex vector formulas to crash or bug out!
+                for i in range(6, 0, -1):
+                    update_hud("ALIGNING RETROGRADE", f"Swinging rocket around... Burning in {i}s")
+                    time.sleep(1)
 
-                # Double-check alignment before burning
-                while True:
-                    fov = vessel.flight(planet_frame).prograde
-                    retrograde_target = (-fov[0], -fov[1], -fov[2])
-                    current_nose_vector = vessel.flight(planet_frame).direction
-                    dot_product = max(-1.0,
-                                      min(1.0, sum(a * b for a, b in zip(current_nose_vector, retrograde_target))))
-                    import math
-                    if math.degrees(math.acos(dot_product)) < 4.0:
-                        break
-                    time.sleep(0.05)
-
-                # Execute the de-orbit braking burn
+                # 4. Safely fire the stopping braking engines
                 vessel.control.throttle = 1.0
-                update_hud("EXECUTING DE-ORBIT BURN", "Commencing engine braking...")
+                update_hud("EXECUTING DE-ORBIT BURN", "Braking engines firing...")
                 time.sleep(6)
                 vessel.control.throttle = 0.0
-                vessel.auto_pilot.disengage()
         else:
             # --- SUB-ORBITAL DETECTED: NO SPINNING, JUST INSTANT STAGE ---
             print("[ABORT SYSTEM]: Sub-orbital. Skipping turn and burn. Jettisoning capsule instantly!")
             update_hud("SUB-ORBITAL ABORT", "Emergency! Dropping stages instantly...")
             time.sleep(0.1)
 
-        # --- INSTANT CASCADE STAGING DECOUPLER (How we used to do it) ---
+        # --- INSTANT CASCADE STAGING DECOUPLER ---
         update_hud("VESSEL JETTISON", "Clearing lower vehicle attachments...")
         vessel.control.sas = True
+        vessel.control.sas_mode = conn.space_center.SASMode.stability_assist  # Reset SAS to normal hold
+
         while vessel.control.current_stage > 0:
             try:
                 vessel.control.activate_next_stage()

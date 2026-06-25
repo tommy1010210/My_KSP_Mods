@@ -1,3 +1,4 @@
+import math
 import time
 import krpc
 
@@ -7,19 +8,21 @@ TARGET_ALTITUDE = 100000  # 100km target orbit
 
 print("Connecting to KSP...")
 try:
-    conn = krpc.connect(name='Universal Autopilot - Perfect Safe Orbit', rpc_port=50120, stream_port=50121)
+    conn = krpc.connect(name='Universal Autopilot - Pro Edition', rpc_port=50120, stream_port=50121)
     print("Connected successfully!")
 except:
     print("Error: Make sure 'Start Server' is clicked in KSP!")
     exit()
 
 vessel = conn.space_center.active_vessel
+mu = vessel.orbit.body.gravitational_parameter
 
 # Core Telemetry Streams
 apoapsis = conn.add_stream(getattr, vessel.orbit, 'apoapsis_altitude')
 periapsis = conn.add_stream(getattr, vessel.orbit, 'periapsis_altitude')
 altitude = conn.add_stream(getattr, vessel.flight(), 'mean_altitude')
 speed = conn.add_stream(getattr, vessel.flight(vessel.orbit.body.reference_frame), 'speed')
+time_to_ap = conn.add_stream(getattr, vessel.orbit, 'time_to_apoapsis')
 
 # --- HUD PANEL SETUP ---
 canvas = conn.ui.stock_canvas
@@ -48,45 +51,32 @@ def check_for_abort():
     if vessel.control.abort:
         print("\n!!! EMERGENCY INTEL-ABORT SYSTEM ENGAGED !!!")
         ui_panel.color = (1.0, 0.1, 0.1)  # Flash HUD Red
-
         vessel.control.throttle = 0.0
 
-        # --- CHECK TRAJECTORY PROFILE ---
-        # ONLY do the retro-burn routine if BOTH Apoapsis and Periapsis are above 70km (Stable Orbit)
         if apoapsis() >= 70000 and periapsis() >= 70000:
             active_engines = [e for e in vessel.parts.engines if e.active and e.has_fuel]
-
             if active_engines:
                 update_hud("EMERGENCY RETRO-ALIGN", "In Orbit: Activating SAS Retrograde mode...")
-
-                # 1. Turn on KSP's built-in SAS system
                 vessel.control.sas = True
-                time.sleep(0.1)  # Brief pause to let the game register SAS activation
-
-                # 2. Tell SAS to select the native 'Retrograde' button
+                time.sleep(0.1)
                 vessel.control.sas_mode = conn.space_center.SASMode.retrograde
 
-                # 3. Give the ship 6 seconds to physically swing around backward
-                # No complex vector formulas to crash or bug out!
                 for i in range(6, 0, -1):
                     update_hud("ALIGNING RETROGRADE", f"Swinging rocket around... Burning in {i}s")
                     time.sleep(1)
 
-                # 4. Safely fire the stopping braking engines
                 vessel.control.throttle = 1.0
                 update_hud("EXECUTING DE-ORBIT BURN", "Braking engines firing...")
                 time.sleep(6)
                 vessel.control.throttle = 0.0
         else:
-            # --- SUB-ORBITAL DETECTED: NO SPINNING, JUST INSTANT STAGE ---
             print("[ABORT SYSTEM]: Sub-orbital. Skipping turn and burn. Jettisoning capsule instantly!")
             update_hud("SUB-ORBITAL ABORT", "Emergency! Dropping stages instantly...")
             time.sleep(0.1)
 
-        # --- INSTANT CASCADE STAGING DECOUPLER ---
         update_hud("VESSEL JETTISON", "Clearing lower vehicle attachments...")
         vessel.control.sas = True
-        vessel.control.sas_mode = conn.space_center.SASMode.stability_assist  # Reset SAS to normal hold
+        vessel.control.sas_mode = conn.space_center.SASMode.stability_assist
 
         while vessel.control.current_stage > 0:
             try:
@@ -97,7 +87,6 @@ def check_for_abort():
 
         update_hud("CAPSULE RECOVERY", "Deploying safety recovery parachutes...")
         vessel.control.chutes = True
-
         time.sleep(5)
         ui_panel.remove()
         print("[MISSION COMPUTER]: Abort sequence complete. Exiting.")
@@ -126,7 +115,7 @@ def execute_intelligent_staging():
 
 
 # Initialize Controls
-vessel.control.sas = True
+vessel.control.sas = False
 vessel.control.throttle = 1.0
 vessel.control.abort = False
 
@@ -138,29 +127,33 @@ for i in range(3, 0, -1):
 
 print("LIFT-OFF!")
 vessel.control.activate_next_stage()
+vessel.auto_pilot.engage()
+vessel.auto_pilot.target_pitch_and_heading(90, 90)
 
-# --- PHASE 1 & 2: LAUNCH & AUTOMATED GRAVITY TURN ---
-turn_started = False
+# --- NEW FEATURE: NASA ROLL PROGRAM ---
+# Rolls the rocket over onto its back immediately after clearing the tower
+rolled = False
+while altitude() < 1000:
+    check_for_abort()
+    if altitude() > 250 and not rolled:
+        vessel.auto_pilot.target_roll = 180  # Orient heads-down for aerodynamic cargo loading
+        rolled = True
+        update_hud("VERTICAL ASCENT", "Executing roll program...")
+    time.sleep(0.02)
+
+# --- PHASE 2: AUTOMATED GRAVITY TURN ---
 while apoapsis() < TARGET_ALTITUDE:
     check_for_abort()
     current_alt = altitude()
     execute_intelligent_staging()
 
-    if current_alt > 1000:
-        if not turn_started:
-            vessel.auto_pilot.engage()
-            turn_started = True
-
-        fraction = min(1.0, (current_alt - 1000) / 44000)
-        target_pitch = 90.0 - (fraction * 80.0)
-        vessel.auto_pilot.target_pitch_and_heading(target_pitch, 90)
-        update_hud("GRAVITY TURN", f"Steering East | Target Pitch: {target_pitch:.0f}°")
-    else:
-        update_hud("VERTICAL ASCENT", "Clearing launch pad towers...")
-
+    fraction = min(1.0, (current_alt - 1000) / 44000)
+    target_pitch = 90.0 - (fraction * 80.0)
+    vessel.auto_pilot.target_pitch_and_heading(target_pitch, 90)
+    update_hud("GRAVITY TURN", f"Steering East | Target Pitch: {target_pitch:.0f}°")
     time.sleep(0.02)
 
-# --- PHASE 3: COASTING TO SPACE & DEPLOYMENT ---
+# --- PHASE 3: COASTING TO SPACE ---
 vessel.control.throttle = 0.0
 vessel.auto_pilot.target_pitch_and_heading(0, 90)
 systems_deployed = False
@@ -177,26 +170,40 @@ while altitude() < 70000:
         systems_deployed = True
         time.sleep(1)
 
-    time_to_space = int((70000 - altitude()) / max(1, speed()))
-    update_hud("COASTING TO SPACE", f"Time to space boundary: {time_to_space}s")
+    update_hud("COASTING TO SPACE", f"Time to apoapsis: {int(time_to_ap())}s")
     time.sleep(0.02)
 
-# --- PHASE 4: SPACE OPERATIONS & ORIENTATION ---
-vessel.control.sas = True
-time.sleep(1)
-vessel.control.sas_mode = conn.space_center.SASMode.prograde
+# --- NEW FEATURE: MATH-BASED CIRCULARISATION BURN ---
+# 1. Calculate orbital math formulas dynamically based on current velocity
+r_ap = vessel.orbit.apoapsis  # Current radius at peak from center of planet
+v_ap = speed()  # Estimated speed at peak (will refine in real time)
 
-while True:
+# Vis-Viva Equation to find exactly how much speed (delta-v) we need to add at peak
+v_circular = math.sqrt(mu / r_ap)
+delta_v = v_circular - v_ap
+
+# Calculate burn length based on active rocket engine thrust properties
+F = vessel.available_thrust
+Isp = vessel.specific_impulse * 9.81
+m0 = vessel.mass
+m1 = m0 / math.exp(delta_v / Isp)
+flow_rate = F / Isp
+burn_time = (m0 - m1) / flow_rate
+
+# 2. Orient the craft perfectly along the horizontal orbital line
+vessel.auto_pilot.target_pitch_and_heading(0, 90)
+vessel.auto_pilot.target_roll = 0
+
+# 3. Wait until the precise split-second to start firing (Half burn time before peak)
+burn_lead_time = burn_time / 2
+while time_to_ap() > burn_lead_time:
     check_for_abort()
-    distance_to_peak = apoapsis() - altitude()
-    if distance_to_peak <= 5000:
-        break
-    update_hud("PRE-BURNS ORIENTATION", f"Coasting to Peak | Distance to Burn: {distance_to_peak / 1000:.1f} km")
+    update_hud("PRE-BURN ORIENTATION", f"Waiting for burn node... T-Minus {int(time_to_ap() - burn_lead_time)}s")
     time.sleep(0.02)
 
-# Execute final circularization injection burn early
+# 4. Execute the calculated insertion injection burn
 vessel.control.throttle = 1.0
-while periapsis() < (TARGET_ALTITUDE - 2000):
+while periapsis() < (TARGET_ALTITUDE - 1000):
     check_for_abort()
     execute_intelligent_staging()
 
@@ -206,16 +213,17 @@ while periapsis() < (TARGET_ALTITUDE - 2000):
     update_hud("CIRCULARIZATION BURN", f"Injecting Rocket Into Safe Orbit...")
     time.sleep(0.02)
 
-# Shut off engines
+# Shut off engines cleanly
 vessel.control.throttle = 0.0
 vessel.auto_pilot.disengage()
+vessel.control.sas = True
+vessel.control.sas_mode = conn.space_center.SASMode.prograde
 
 # --- THE POST-FLIGHT WATCH LOOP ---
-# Only loops here if the launch script ran all the way through to completion!
 while True:
     check_for_abort()
+    update_hud("ORBIT ACHIEVED", "Vessel resting safely in target orbit.")
 
-    # Automatic check: If both points are still sub-orbital, bail out the capsule
     if apoapsis() < 70000 and periapsis() < 70000:
         print("\n!!! FAIL-SAFE ACCIDENT RESPONSE ACTUATED !!!")
         ui_panel.color = (1.0, 0.5, 0.0)
@@ -229,7 +237,4 @@ while True:
         vessel.control.chutes = True
         ui_panel.remove()
         exit()
-
-    update_hud("MISSION ACCOMPLISHED", "Status: Stable Orbit Established. Computer Idle.")
-    vessel.control.sas_mode = conn.space_center.SASMode.prograde
     time.sleep(1)

@@ -4,7 +4,6 @@ These WILL Need to be run SEPARATELY From the game as the game CANNOT Read .Py F
 Have Fun!
 If you need to contact me URGENTLY Contact me on Discord: tommy08069
 Otherwise make an issues report on GitHub, I don't usualy check there, but I may get a notification and I will answer ASAP.
-AND NO I WILL NOT CONVERT THEM TO DLLS IDK HOW TO allthough there is 1 dll I just coppied some code.
 Things that are NOT in ready to release are in Beta. Please be careful.
 
 There is also A MIT License involved. This states that you CAN distribute, download, and commercially use it.

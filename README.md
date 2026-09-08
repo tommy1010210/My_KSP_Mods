@@ -8,8 +8,10 @@ AND NO I WILL NOT CONVERT THEM TO DLLS IDK HOW TO allthough there is 1 dll I jus
 Things that are NOT in ready to release are in Beta. Please be careful.
 
 There is also A MIT License involved. This states that you CAN distribute, download, and commercially use it.
-It also states that you CANNOT sue me for damages, loss of files, etc. And you CANNOT use this without credit or make money off it without attribution.
-If you do, I am legally allowed to file a GitHub DMCA takedown, report it to the hosting site, or take legal action.
+It also states that you CANNOT sue me for damages, loss of files, etc. And you CANNOT use this without credit
+or make money off it without attribution.
+If you do, I am legally allowed to file a GitHub DMCA takedown, report it to the hosting site, or take legal
+action.
 
 Thanks again:
   tommy08069

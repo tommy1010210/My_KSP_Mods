@@ -25,7 +25,6 @@ vessel = conn.space_center.active_vessel
 body = vessel.orbit.body
 mu = body.gravitational_parameter
 
-# --- COMPENSATE FOR PLANETARY ROTATION SPEED ---
 # This adjusts our launch heading so Kerbin's rotation doesn't ruin the polar angle
 r_surface = body.equatorial_radius
 rotational_period = body.rotational_period
@@ -48,7 +47,6 @@ else:
 
 print(f"Trajectory parameters locked: {orbit_type_str}")
 
-# Core Telemetry Streams
 apoapsis = conn.add_stream(getattr, vessel.orbit, 'apoapsis_altitude')
 periapsis = conn.add_stream(getattr, vessel.orbit, 'periapsis_altitude')
 altitude = conn.add_stream(getattr, vessel.flight(), 'mean_altitude')
@@ -80,14 +78,14 @@ def update_hud(phase, extra_text=""):
 def check_for_abort():
     """Monitors KSP's abort group and triggers a emergency escape profiles."""
     if vessel.control.abort:
-        print("\n!!! EMERGENCY INTEL-ABORT SYSTEM ENGAGED !!!")
+        print("\n!!! EMERGENCY ABORT SYSTEM ENGAGED !!!")
         ui_panel.color = (1.0, 0.1, 0.1)
         vessel.control.throttle = 0.0
 
         if apoapsis() >= 70000 and periapsis() >= 70000:
             active_engines = [e for e in vessel.parts.engines if e.active and e.has_fuel]
             if active_engines:
-                update_hud("EMERGENCY RETRO-ALIGN", "In Orbit: Activating SAS Retrograde mode...")
+                update_hud("In Orbit: Activating SAS Retrograde mode...")
                 vessel.control.sas = True
                 time.sleep(0.1)
                 vessel.control.sas_mode = conn.space_center.SASMode.retrograde
@@ -101,8 +99,8 @@ def check_for_abort():
                 time.sleep(6)
                 vessel.control.throttle = 0.0
         else:
-            print("[ABORT SYSTEM]: Sub-orbital. Jettisoning capsule instantly!")
-            update_hud("SUB-ORBITAL ABORT", "Emergency! Dropping stages instantly...")
+            print("[ABORT SYSTEM]: Sub-orbital. Jettisoning capsule!")
+            update_hud("SUB-ORBITAL ABORT", "Emergency! Dropping stages...")
             time.sleep(0.1)
 
         update_hud("VESSEL JETTISON", "Clearing lower vehicle attachments...")
@@ -139,7 +137,7 @@ def execute_intelligent_staging():
             break
 
     if should_stage:
-        print("\n[STAGING BRAIN]: Flameout detected. Executing clean decoupling...")
+        print("\n[STAGING BRAIN]: Flameout detected.")
         vessel.control.activate_next_stage()
         time.sleep(0.6)
 
@@ -202,7 +200,6 @@ while altitude() < 70000:
     update_hud("COASTING TO SPACE", f"Time to apoapsis: {int(time_to_ap())}s")
     time.sleep(0.02)
 
-# --- ADVANCED MATHEMATICAL CIRCULARISATION BURN ---
 # Recalculates dynamically right before the burn based on actual achieved trajectory speed
 r_ap = vessel.orbit.apoapsis
 v_ap = speed()
@@ -246,7 +243,6 @@ vessel.auto_pilot.disengage()
 vessel.control.sas = True
 vessel.control.sas_mode = conn.space_center.SASMode.prograde
 
-# --- THE POST-FLIGHT WATCH LOOP ---
 while True:
     check_for_abort()
     update_hud("ORBIT ACHIEVED", f"Vessel resting safely in target orbit.")

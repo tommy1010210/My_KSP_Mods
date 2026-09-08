@@ -1,13 +1,13 @@
 ---
-name: Bug report
-about: Create a report to help us improve
+name: Bug Report
+about: Create a report to help us improve the application
 title: ''
 labels: ''
 assignees: tommy1010210
 
 ---
 
-If this is EXTREAMLY ERGENT or a Feature request contact me on discord: tommy08069 i will try reply ASAP
+If this is EXTREMELY URGENT or a Feature request contact me on discord: tommy08069 I will try reply ASAP
 **Describe the bug**
 A clear and concise description of what the bug is.
 

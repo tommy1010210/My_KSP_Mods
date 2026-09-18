@@ -76,7 +76,7 @@ def update_hud(phase, extra_text=""):
 
 
 def check_for_abort():
-    """Monitors KSP's abort group and triggers a emergency escape profiles."""
+    """Monitors KSP's abort group and triggers an emergency escape profiles."""
     if vessel.control.abort:
         print("\n!!! EMERGENCY ABORT SYSTEM ENGAGED !!!")
         ui_panel.color = (1.0, 0.1, 0.1)
